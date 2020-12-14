@@ -1,0 +1,8 @@
+(executable
+ (name main)
+ (libraries base stdio FrontC)
+)
+
+(env
+  (dev
+    (flags (:standard -warn-error -A))))
