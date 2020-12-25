@@ -100,8 +100,8 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
   let rec traverse_rnt rnt (map : rntMapT) name s : rntMapT = begin 
       let calls = Util.calls_in_stmts s in 
 
-      let add_calles calles = begin 
-        List.fold ~init:map ~f:begin fun acc callee -> 
+      let add_calles m calles = begin 
+        List.fold ~init:m ~f:begin fun acc callee -> 
           Map.update acc name ~f:(function 
             | Some(FunctionNode(sn, b, parents, rnt)) -> FunctionNode(sn, b, callee :: parents, rnt) 
             | _ -> GhostFunction
@@ -113,7 +113,7 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
 
       Map.find rnt name |> function 
         | None -> begin 
-           add_calles calls
+           add_calles map calls
            
         end
         | Some(children : string list) -> begin 
@@ -126,10 +126,20 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
             let new_map = 
               List.fold ~init:map ~f:(fun acc child -> traverse_rnt rnt acc child (get_node_child_stmt acc child) ) children
             in 
+            let open List.Monad_infix in 
+            let childStatements = List.map ~f:(fun c -> get_node_child_stmt new_map c) children in
+            let childCalls = childStatements >>= Util.calls_in_stmts in
+            let uniqieCalls = Set.to_list @@ Set.of_list (module String) calls in
 
-            (* TODO - add self, filter and stuff *)
 
-            new_map
+
+            add_calles new_map 
+              @@ List.filter
+                 ~f:begin fun funcname -> 
+                    List.count ~f:(fun a -> String.equal a funcname) childCalls 
+                    < List.count ~f:(fun a -> String.equal a funcname) calls
+                 end
+                 uniqieCalls
         end     
   end in
 

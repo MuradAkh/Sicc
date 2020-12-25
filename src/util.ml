@@ -44,16 +44,16 @@ let do_generic f g = begin function
 	| LABEL(_st, s) -> g s
 	| GOTO(_) -> []
 	| ASM(_) -> []
-	| GNU_ASM(st, _, _, _) -> []
+	| GNU_ASM(_, _, _, _) -> []
 	| STAT_LINE(s, _, _) -> g s
 end 
 
-let rec do_expr f = begin function 
+let do_expr f = begin function 
   | NOTHING -> []
 	| UNARY(_, e) -> f e
 	| BINARY(_, e1, e2) -> [e1; e2] >>= f
 	| QUESTION(e1, e2, e3) -> [e1; e2; e3] >>= f
-	| CAST(bt, e) -> f e
+	| CAST(_, e) -> f e
 	| CALL(e, el) -> e :: el >>= f
 	| COMMA(el) -> el >>= f
 	| CONSTANT(_) -> []
