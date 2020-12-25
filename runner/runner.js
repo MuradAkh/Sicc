@@ -1,0 +1,21 @@
+const spawn = require('child_process').spawn;
+const child = spawn("./src/_build/default/main.exe", ["./test/sample/hello.c"]);
+
+
+async function main(){
+    child.stdin.setEncoding('utf-8');
+
+    child.stdin.write("rnt\n");
+    child.stdout.on('data', function(data) {
+        // There is some data to read now.
+        console.log("" + data);
+
+    });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // child.stdin.write("rnt\n");
+    // child.stdin.write("nonfuns\n");
+
+    child.stdin.end();
+}
+
+main()

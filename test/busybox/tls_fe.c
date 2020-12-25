@@ -316,7 +316,7 @@ static void xc_double(byte *x3, byte *z3,
 	fe_mul_c(z3, x1sq, 4);
 }
 
-void target(byte *result, const byte *e, const byte *q)
+void main(byte *result, const byte *e, const byte *q)
 {
 	int i;
 
