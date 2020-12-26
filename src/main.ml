@@ -23,7 +23,39 @@ type rnt_node =
 
 type rntMapT = (string, rnt_node, String.comparator_witness) Map.t
 
+let get_linear_seq (stmt : Cabs.statement) : (Cabs.statement * Cabs.statement) option = 
+  let is_cheap = begin function 
+    | Cabs.WHILE(_, _) -> false
+    | Cabs.DOWHILE(_, _) -> false
+    | Cabs.FOR(_, _, _, _) -> false
+    | Cabs.COMPUTATION(expr) when 0 < List.length @@ Util.search_calls expr -> false
+    | _ -> true
+  end in
+  let open Base.List.Monad_infix in
   
+  let rec flatten_sequence = begin function 
+    | Cabs.SEQUENCE(s1, s2) -> [s1;s2] >>= flatten_sequence 
+    | s -> [s]
+  end in 
+
+  let rec do_extract (sofar: Cabs.statement list) = begin function
+  | (next :: rest) -> 
+    if is_cheap next then
+      do_extract (next :: sofar) rest
+    else 
+      sofar, next :: rest
+  | [] -> sofar, []
+  end in 
+
+  let to_extract, to_leave = do_extract [] (flatten_sequence stmt) in 
+  let extracted = List.reduce ~f:(fun a c -> Cabs.SEQUENCE(c, a)) to_extract in
+  let left = List.reduce ~f:(fun a c -> Cabs.SEQUENCE(a,c)) to_leave in
+  
+  let open Option.Monad_infix in 
+    left        >>= fun l ->
+    extracted   >>| fun e -> 
+    (e, l)
+
 
 let print_rnt = begin function 
   | InnerNode(statement, _) -> Cprint.print_statement statement; 
@@ -32,35 +64,47 @@ let print_rnt = begin function
 end 
 
 let rec generate_inner_rnt (parent_id: string) index_map tree_map statement = begin 
-  let do_add (s: Cabs.statement) = begin 
+  let do_add (s: Cabs.statement) recurse = begin 
     let new_id = generate_id () in
     let new_tree = Map.update tree_map parent_id ~f:(function | None -> [new_id] | Some(c) -> new_id :: c) in
     let new_index = Map.set index_map ~key:new_id ~data:(InnerNode(s, parent_id)) in
-    generate_inner_rnt new_id new_index new_tree s
+    if recurse then 
+      generate_inner_rnt new_id new_index new_tree s
+    else new_index, new_tree
   end in 
 
-  let traverse_multiple s1 s2 = begin 
-      let s1_rnt, s1_tree = (generate_inner_rnt parent_id index_map tree_map s1) in
-      let s2_rnt, s2_tree = (generate_inner_rnt parent_id index_map tree_map s2) in
 
-      (Map.merge_skewed 
+  let mergemaps (r1, t1) (r2, t2) = begin 
+    (Map.merge_skewed 
             ~combine:(fun ~key:_ v1 _ -> v1)
-            s1_rnt
-            s2_rnt
+            r1
+            r2
       ),
       (Map.merge_skewed 
             ~combine:(fun ~key:_ v1 v2 -> List.concat [v1; v2])
-            s1_tree
-            s2_tree
+            t1
+            t2
       )
+  end in
+
+  let traverse_multiple s1 s2 = begin 
+      let m1 = (generate_inner_rnt parent_id index_map tree_map s1) in
+      let m2 = (generate_inner_rnt parent_id index_map tree_map s2) in
+      mergemaps m1 m2
+      
   end in
 
   let open Cabs in
   match statement with
-  | WHILE(_, s) -> do_add s
-	| DOWHILE(_, s) -> do_add s
-	| FOR(_, _, _, s) -> do_add s
-	| SEQUENCE(s1, s2) -> traverse_multiple s1 s2
+  | WHILE(_, s) -> do_add s true
+	| DOWHILE(_, s) -> do_add s true
+	| FOR(_, _, _, s) -> do_add s true
+	| SEQUENCE(s1, s2) -> begin 
+    let seq = get_linear_seq statement in 
+    match seq with 
+      | Some((e, rest)) -> mergemaps (do_add e false) (generate_inner_rnt parent_id index_map tree_map rest)
+      | None -> traverse_multiple s1 s2
+  end
 	| IF(_, s1, s2) -> traverse_multiple s1 s2
 	| BLOCK(_, s) -> generate_inner_rnt parent_id index_map tree_map s
 	| SWITCH(_, s1) -> generate_inner_rnt parent_id index_map tree_map s1
@@ -130,8 +174,6 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
             let childStatements = List.map ~f:(fun c -> get_node_child_stmt new_map c) children in
             let childCalls = childStatements >>= Util.calls_in_stmts in
             let uniqieCalls = Set.to_list @@ Set.of_list (module String) calls in
-
-
 
             add_calles new_map 
               @@ List.filter

@@ -31,15 +31,15 @@ let do_generic f g = begin function
 	| COMPUTATION(expression) -> f expression
 	| BLOCK(_, s) -> g s
 	| SEQUENCE(s1, s2) -> [s1; s2] >>= g
-	| IF(e, s1, s2) -> List.concat [f e; g s1; g s2]
-	| WHILE(e, s) -> List.concat [f e; g s]
-	| DOWHILE(e, s) -> List.concat [f e; g s]
-	| FOR(e1, e2, e3, s) -> List.concat [[e1;e2; e3] >>= f; g s]
+	| IF(e, s1, s2) -> concat [f e; g s1; g s2]
+	| WHILE(e, s) -> concat [f e; g s]
+	| DOWHILE(e, s) -> concat [f e; g s]
+	| FOR(e1, e2, e3, s) -> concat [[e1;e2; e3] >>= f; g s]
 	| BREAK -> []
 	| CONTINUE -> []
 	| RETURN(e) -> f e
-	| SWITCH(e, s1) -> List.concat [f e; g s1]
-	| CASE(e, s) -> List.concat [f e; g s]
+	| SWITCH(e, s1) -> concat [f e; g s1]
+	| CASE(e, s) -> concat [f e; g s]
 	| DEFAULT(s) -> g s
 	| LABEL(_st, s) -> g s
 	| GOTO(_) -> []
@@ -72,9 +72,18 @@ let rec search_calls = begin function
   | e -> do_expr search_calls e
 end
 
+let rec search_vars = begin function  
+  | VARIABLE(s) ->  [s]
+  | e -> do_expr search_vars e
+end
+
 let calls_in_stmts s = begin 
   let rec searcher st = do_generic search_calls searcher st in 
   searcher s;
 end 
 
+let vars_in_stmts s = begin 
+  let rec searcher st = do_generic search_vars searcher st in 
+  searcher s;
+end 
 
