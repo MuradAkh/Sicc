@@ -1,5 +1,4 @@
 open Base
-open Util
 
 let counter = ref 0
 
@@ -14,9 +13,10 @@ let get_function_name (sname : Cabs.single_name): string = begin
   let (_, _, (name, _, _, _)) = sname in name
 end
 
+type variable_list = (string * Cabs.base_type) sexp_list
 type rnt_node = 
    | GhostFunction
-   | InnerNode of Cabs.statement * string (* id of parent *)
+   | InnerNode of string * variable_list * Cabs.statement * string (* id of parent *)
    | FunctionNode of Cabs.single_name * Cabs.body 
         * string list (* ids of parents *) 
         * ((string, string sexp_list, String.comparator_witness) Map.t) (* rnt *)
@@ -50,26 +50,39 @@ let get_linear_seq (stmt : Cabs.statement) : (Cabs.statement * Cabs.statement) o
   let to_extract, to_leave = do_extract [] (flatten_sequence stmt) in 
   let extracted = List.reduce ~f:(fun a c -> Cabs.SEQUENCE(c, a)) to_extract in
   let left = List.reduce ~f:(fun a c -> Cabs.SEQUENCE(a,c)) to_leave in
+
+  if List.length to_extract < 1 then 
+    None 
+  else
+  
   
   let open Option.Monad_infix in 
     left        >>= fun l ->
     extracted   >>| fun e -> 
     (e, l)
 
+let make_function (s: Cabs.statement) varlist name = begin
+  (* let vars = Util.vars_in_stmts s in  *)
+  let variables_decs = List.map varlist ~f:(fun (vname, vtype) -> (vtype, Cabs.NO_STORAGE, (vname, vtype, [], Cabs.NOTHING))) in
+  let proto = Cabs.PROTO(Cabs.VOID, variables_decs, false) in
+  Cabs.FUNDEF((Cabs.VOID, Cabs.NO_STORAGE, (name, proto, [], Cabs.NOTHING)), ([], s))
+end
 
 let print_rnt = begin function 
-  | InnerNode(statement, _) -> Cprint.print_statement statement; 
+  | InnerNode(name, varlist, statement, _) -> Cprint.print_def @@ make_function statement varlist name 
   | FunctionNode(sn, body, _, _) -> Cprint.print_def @@ Cabs.FUNDEF(sn, body)
-  | GhostFunction -> ();
+  | GhostFunction -> Stdio.print_endline "GHOST";
 end 
 
-let rec generate_inner_rnt (parent_id: string) index_map tree_map statement = begin 
+let rec generate_inner_rnt ntm (parent_id: string) index_map tree_map statement = begin 
   let do_add (s: Cabs.statement) recurse = begin 
     let new_id = generate_id () in
     let new_tree = Map.update tree_map parent_id ~f:(function | None -> [new_id] | Some(c) -> new_id :: c) in
-    let new_index = Map.set index_map ~key:new_id ~data:(InnerNode(s, parent_id)) in
+    let variables = Util.vars_in_stmts s in 
+    let vars_with_types = List.map variables ~f:(fun v -> (v, match Map.find ntm v with Some(a) -> a | None -> Cabs.VOID )) in
+    let new_index = Map.set index_map ~key:new_id ~data:(InnerNode(new_id, vars_with_types, s, parent_id)) in
     if recurse then 
-      generate_inner_rnt new_id new_index new_tree s
+      generate_inner_rnt ntm new_id new_index new_tree s
     else new_index, new_tree
   end in 
 
@@ -88,8 +101,8 @@ let rec generate_inner_rnt (parent_id: string) index_map tree_map statement = be
   end in
 
   let traverse_multiple s1 s2 = begin 
-      let m1 = (generate_inner_rnt parent_id index_map tree_map s1) in
-      let m2 = (generate_inner_rnt parent_id index_map tree_map s2) in
+      let m1 = (generate_inner_rnt ntm parent_id index_map tree_map s1) in
+      let m2 = (generate_inner_rnt ntm parent_id index_map tree_map s2) in
       mergemaps m1 m2
       
   end in
@@ -102,16 +115,16 @@ let rec generate_inner_rnt (parent_id: string) index_map tree_map statement = be
 	| SEQUENCE(s1, s2) -> begin 
     let seq = get_linear_seq statement in 
     match seq with 
-      | Some((e, rest)) -> mergemaps (do_add e false) (generate_inner_rnt parent_id index_map tree_map rest)
-      | None -> traverse_multiple s1 s2
+      | Some((e, rest)) -> mergemaps (do_add e false) (generate_inner_rnt ntm parent_id index_map tree_map rest)
+      | _ -> traverse_multiple s1 s2
   end
 	| IF(_, s1, s2) -> traverse_multiple s1 s2
-	| BLOCK(_, s) -> generate_inner_rnt parent_id index_map tree_map s
-	| SWITCH(_, s1) -> generate_inner_rnt parent_id index_map tree_map s1
-	| CASE(_, s) -> generate_inner_rnt parent_id index_map tree_map s
-	| DEFAULT(s) -> generate_inner_rnt parent_id index_map tree_map s
-	| LABEL(_, s) -> generate_inner_rnt parent_id index_map tree_map s
-	| STAT_LINE(s, _, _) -> generate_inner_rnt parent_id index_map tree_map s
+	| BLOCK(_, s) -> generate_inner_rnt ntm parent_id index_map tree_map s
+	| SWITCH(_, s1) -> generate_inner_rnt ntm parent_id index_map tree_map s1
+	| CASE(_, s) -> generate_inner_rnt ntm parent_id index_map tree_map s
+	| DEFAULT(s) -> generate_inner_rnt ntm parent_id index_map tree_map s
+	| LABEL(_, s) -> generate_inner_rnt ntm parent_id index_map tree_map s
+	| STAT_LINE(s, _, _) -> generate_inner_rnt ntm parent_id index_map tree_map s
 	| BREAK -> index_map, tree_map
 	| RETURN(_) -> index_map, tree_map
 	| CONTINUE -> index_map, tree_map
@@ -123,14 +136,47 @@ let rec generate_inner_rnt (parent_id: string) index_map tree_map statement = be
 end
 
 
+
 let add_func_node index_map funcnode = begin 
+  let create_name_type_map (sn: Cabs.single_name) (defs: Cabs.definition sexp_list) = begin 
+    (* local variables *)
+    let name_groups = List.fold defs ~init:[] 
+      ~f:begin fun acc curr -> 
+        match curr with 
+        | Cabs.DECDEF(ng) -> ng :: acc
+        | Cabs.TYPEDEF(ng, _) -> ng :: acc
+        | Cabs.ONLYTYPEDEF(ng) -> ng :: acc
+        | _ -> acc
+    end in
+    
+    let vars_of_name_group (group: Cabs.name_group) = begin
+      let bt, _, sns = group in 
+      List.map sns ~f:(fun (name, _, _, _) ->(name, bt))
+    end in
+
+    (* variables from parameters *)
+    let _, _, cabs_name = sn in
+    let _, bt, _, _ = cabs_name in 
+    
+    let param_types = match bt with 
+      | Cabs.PROTO(_, var_dec, _) -> 
+        Option.return @@ List.map var_dec ~f:(fun (bt, _, (vname, _, _, _)) -> (vname, bt))
+      | _ -> None
+    in
+
+    let open Option.Monad_infix in
+    param_types >>| fun types -> 
+    Map.of_alist_reduce ~f:(fun a _ -> a) (module String) @@ List.concat [types; (List.bind name_groups ~f:vars_of_name_group)]
+  end in
+
+
   match funcnode with 
     | Cabs.FUNDEF(sn, (def, s)) -> begin 
+       let name_type_map = match create_name_type_map sn def with Some(m) -> m | None -> Map.empty (module String) in
        let parents = [] in (*set in update*)
        let stringname = get_function_name sn in 
-       let new_index, new_tree = generate_inner_rnt stringname index_map (Map.empty (module String)) s in 
+       let new_index, new_tree = generate_inner_rnt name_type_map stringname index_map (Map.empty (module String)) s in 
        let new_func = FunctionNode(sn, (def, s), parents, new_tree) in 
-       calls_in_stmts  s |> ignore;
        Map.set ~key:stringname ~data:new_func new_index
     end
     | _ -> begin 
@@ -146,8 +192,9 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
 
       let add_calles m calles = begin 
         List.fold ~init:m ~f:begin fun acc callee -> 
-          Map.update acc name ~f:(function 
-            | Some(FunctionNode(sn, b, parents, rnt)) -> FunctionNode(sn, b, callee :: parents, rnt) 
+          Map.update acc callee ~f:(function 
+            | Some(FunctionNode(sn, b, parents, rnt)) -> FunctionNode(sn, b, name :: parents, rnt) 
+            (* | Some(a) -> a *)
             | _ -> GhostFunction
           ) 
         end 
@@ -163,7 +210,7 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
         | Some(children : string list) -> begin 
             let get_node_child_stmt (m: rntMapT) (c:string) = begin match Map.find_exn m c with 
                 | FunctionNode(_, (_, s), _,_) -> s
-                | InnerNode(s, _) -> s
+                | InnerNode(_,_, s, _) -> s
                 | GhostFunction -> Cabs.NOP;
             end in 
 
@@ -230,7 +277,7 @@ let rename_main (defs: Cabs.definition list) = begin
 
 end 
 
-let get_funcs ?(reverse=false) (defs: Cabs.definition list)  = begin
+let get_funcs ?(reverse=false) (defs: Cabs.definition list) = begin
     let do_fun (def: Cabs.definition) : bool = (
       match def with 
         | Cabs.FUNDEF(_, _) -> not reverse
@@ -249,7 +296,7 @@ let run_server (funs, entry) nonfuns = begin
       | "main" -> Cprint.print_def entry;
       | "rnt" -> begin 
         let rnt = generate_rnt @@ entry :: funs in 
-        Map.iteri ~f:(fun ~key:k ~data:d-> Stdio.print_endline k; print_rnt d) rnt;
+        Map.iteri ~f:(fun ~key:_ ~data:d->  print_rnt d) rnt;
   
 
       end

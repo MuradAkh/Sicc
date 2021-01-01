@@ -11,6 +11,11 @@ async function main(){
         console.log("" + data);
 
     });
+    child.stderr.on('data', function(data) {
+        // There is some data to read now.
+        console.error("" + data);
+
+    });
     await new Promise(resolve => setTimeout(resolve, 1000));
     // child.stdin.write("rnt\n");
     // child.stdin.write("nonfuns\n");

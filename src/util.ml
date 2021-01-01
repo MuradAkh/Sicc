@@ -74,6 +74,7 @@ end
 
 let rec search_vars = begin function  
   | VARIABLE(s) ->  [s]
+	| CALL(_, el) -> el >>= search_calls
   | e -> do_expr search_vars e
 end
 
@@ -84,6 +85,6 @@ end
 
 let vars_in_stmts s = begin 
   let rec searcher st = do_generic search_vars searcher st in 
-  searcher s;
+  Set.to_list @@ Set.of_list (module String) @@ searcher s;
 end 
 
