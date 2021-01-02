@@ -1,5 +1,5 @@
 const spawn = require('child_process').spawn;
-const child = spawn("./src/_build/default/main.exe", ["./test/sample/hello.c"]);
+const child = spawn("./src/_build/default/main.exe", ["./test/busybox/tls_fe.c"]);
 
 
 async function main(){

@@ -2,6 +2,10 @@ open Base
 
 let counter = ref 0
 
+let is_not_verifier_function (func: string) = begin
+  let verifier_functions = Set.of_list (module String) ["assume"; "assert";] in 
+  not @@ Set.mem verifier_functions func
+end
 
 let generate_id _ = begin
   let curr = !counter in 
@@ -28,7 +32,9 @@ let get_linear_seq (stmt : Cabs.statement) : (Cabs.statement * Cabs.statement) o
     | Cabs.WHILE(_, _) -> false
     | Cabs.DOWHILE(_, _) -> false
     | Cabs.FOR(_, _, _, _) -> false
-    | Cabs.COMPUTATION(expr) when 0 < List.length @@ Util.search_calls expr -> false
+    | Cabs.COMPUTATION(expr) 
+        when 0 < List.length @@ List.filter ~f:(is_not_verifier_function) @@ Util.search_calls expr 
+        -> false
     | _ -> true
   end in
   let open Base.List.Monad_infix in
@@ -107,11 +113,15 @@ let rec generate_inner_rnt ntm (parent_id: string) index_map tree_map statement 
       
   end in
 
+  let create_assume expr = begin 
+    Cabs.COMPUTATION(Cabs.CALL(Cabs.VARIABLE("assume"), [expr]))
+  end in
+
   let open Cabs in
   match statement with
-  | WHILE(_, s) -> do_add s true
-	| DOWHILE(_, s) -> do_add s true
-	| FOR(_, _, _, s) -> do_add s true
+  | WHILE(e, s) -> do_add (Cabs.SEQUENCE(create_assume e, s)) true
+	| DOWHILE(e, s) -> do_add (Cabs.SEQUENCE(create_assume e, s)) true
+	| FOR(_, e, _, s) -> do_add (Cabs.SEQUENCE(create_assume e, s)) true
 	| SEQUENCE(s1, s2) -> begin 
     let seq = get_linear_seq statement in 
     match seq with 
@@ -154,6 +164,8 @@ let add_func_node index_map funcnode = begin
       List.map sns ~f:(fun (name, _, _, _) ->(name, bt))
     end in
 
+    let defs_types = (List.bind name_groups ~f:vars_of_name_group) in
+
     (* variables from parameters *)
     let _, _, cabs_name = sn in
     let _, bt, _, _ = cabs_name in 
@@ -166,7 +178,7 @@ let add_func_node index_map funcnode = begin
 
     let open Option.Monad_infix in
     param_types >>| fun types -> 
-    Map.of_alist_reduce ~f:(fun a _ -> a) (module String) @@ List.concat [types; (List.bind name_groups ~f:vars_of_name_group)]
+    Map.of_alist_reduce ~f:(fun a _ -> a) (module String) @@ List.concat [types; defs_types]
   end in
 
 
@@ -255,7 +267,6 @@ let generate_rnt (functions: Cabs.definition list) = begin
 end
 
 let rename_main (defs: Cabs.definition list) = begin
-    
     let rename (def: Cabs.definition) : Cabs.definition = (
       match def with 
         | Cabs.FUNDEF((bt, st, (name, bt2, attr, exp)), body) when String.equal name "main" -> 

@@ -2,6 +2,43 @@ open Cabs
 open Base
 open Base.List
 
+let vars_in_defs defs = begin
+    let name_groups = List.fold defs ~init:[] 
+      ~f:begin fun acc curr -> 
+        match curr with 
+        | Cabs.DECDEF(ng) -> ng :: acc
+        | Cabs.TYPEDEF(ng, _) -> ng :: acc
+        | Cabs.ONLYTYPEDEF(ng) -> ng :: acc
+        | _ -> acc
+    end in
+    
+    let vars_of_name_group (group: Cabs.name_group) = begin
+      let bt, _, sns = group in 
+      List.map sns ~f:(fun (name, _, _, _) ->(name, bt))
+    end in
+
+    (List.bind name_groups ~f:vars_of_name_group)
+end 
+
+
+let do_def_exprs f defs = begin
+    let name_groups = List.fold defs ~init:[] 
+      ~f:begin fun acc curr -> 
+        match curr with 
+        | Cabs.DECDEF(ng) -> ng :: acc
+        | Cabs.TYPEDEF(ng, _) -> ng :: acc
+        | Cabs.ONLYTYPEDEF(ng) -> ng :: acc
+        | _ -> acc
+    end in
+    
+    let vars_of_name_group (group: Cabs.name_group) = begin
+      let _, _, sns = group in 
+      List.map sns ~f:(fun (_, _, _, e) -> e)
+    end in
+
+    name_groups 			 >>= 
+		vars_of_name_group >>= f
+end 
 
 let transform_statement (f: Cabs.statement->Cabs.statement) (stmt: Cabs.statement): Cabs.statement = begin
   match stmt with
@@ -29,7 +66,7 @@ end
 let do_generic f g = begin function
 	| NOP -> []
 	| COMPUTATION(expression) -> f expression
-	| BLOCK(_, s) -> g s
+	| BLOCK(defs, s) -> concat [do_def_exprs f defs; g s]
 	| SEQUENCE(s1, s2) -> [s1; s2] >>= g
 	| IF(e, s1, s2) -> concat [f e; g s1; g s2]
 	| WHILE(e, s) -> concat [f e; g s]
@@ -74,7 +111,7 @@ end
 
 let rec search_vars = begin function  
   | VARIABLE(s) ->  [s]
-	| CALL(_, el) -> el >>= search_calls
+	| CALL(_, el) -> el >>= search_vars
   | e -> do_expr search_vars e
 end
 

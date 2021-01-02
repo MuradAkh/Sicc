@@ -345,7 +345,7 @@ void main(byte *result, const byte *e, const byte *q)
 	lm_copy(xm, q);
 
 	for (i = 253; i >= 0; i--) {
-		const int bit = (e[i >> 3] >> (i & 7)) & 1;
+		int bit = (e[i >> 3] >> (i & 7)) & 1;
 		byte xms[F25519_SIZE];
 		byte zms[F25519_SIZE];
 
