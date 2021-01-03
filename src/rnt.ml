@@ -39,34 +39,27 @@ end
 
 
 (* Makes total sence, nothing to see here *)
-let rec get_all_called_funs ignore_set rnt node: rnt_node list = begin match node with
- | InnerNode(_, _, statement, _) -> 
+let rec get_all_called_funs ignore_set rnt node: rnt_node list = begin 
+  let helper calls = begin 
     let open List.Monad_infix in 
-    let calls = Util.calls_in_stmts statement in 
     node :: begin calls
-      |> List.filter ~f:(fun call -> not @@ Set.mem ignore_set call)
-      |> List.map ~f:(fun call -> Map.find rnt call)
-      >>= (function None -> [] | Some(a) -> [a])
-      >>= get_all_called_funs (Set.union ignore_set @@ Set.of_list (module String) calls) rnt
-      |> List.map ~f:(fun curr -> (get_rnt_id curr, curr))
-      |> Map.of_alist_reduce (module String) ~f:(fun a _ -> a) 
-      |> Map.to_alist
-      |> List.map ~f:(fun (_, v) -> v)
-    end
- | FunctionNode(_, (defs, statement), _, _) -> 
-    let open List.Monad_infix in 
-    let calls = (Util.do_def_exprs Util.search_calls defs) @ Util.calls_in_stmts statement in 
-    node :: begin calls
-      |> List.filter ~f:(fun call -> not @@ Set.mem ignore_set call)
-      |> List.map ~f:(fun call -> Map.find rnt call)
-      >>= (function None -> [] | Some(a) -> [a])
-      >>= get_all_called_funs (Set.union ignore_set @@ Set.of_list (module String) calls) rnt
-      |> List.map ~f:(fun curr -> (get_rnt_id curr, curr))
-      |> Map.of_alist_reduce (module String) ~f:(fun a _ -> a) 
-      |> Map.to_alist
-      |> List.map ~f:(fun (_, v) -> v)
-    end 
- | GhostFunction(_) -> []
+        |> List.filter ~f:(fun call -> not @@ Set.mem ignore_set call)
+        |> List.map ~f:(fun call -> Map.find rnt call)
+        >>= (function None -> [] | Some(a) -> [a])
+        >>= get_all_called_funs (Set.union ignore_set @@ Set.of_list (module String) calls) rnt
+        |> List.map ~f:(fun curr -> (get_rnt_id curr, curr))
+        |> Map.of_alist_reduce (module String) ~f:(fun a _ -> a) 
+        |> Map.to_alist
+        |> List.map ~f:(fun (_, v) -> v)
+      end
+  end in
+
+  match node with
+  | InnerNode(_, _, statement, _) -> 
+      helper @@ Util.calls_in_stmts statement 
+  | FunctionNode(_, (defs, statement), _, _) -> 
+      helper @@ (Util.do_def_exprs Util.search_calls defs) @ Util.calls_in_stmts statement 
+  | GhostFunction(_) -> []
 end
 
 let get_linear_seq (stmt : Cabs.statement) : (Cabs.statement * Cabs.statement) option = 
