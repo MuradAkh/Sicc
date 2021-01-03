@@ -5,8 +5,9 @@ const child = spawn("./src/_build/default/main.exe", ["./test/busybox/tls_fe.c"]
 async function main(){
     child.stdin.setEncoding('utf-8');
 
-    child.stdin.write("rnt\n");
-    child.stdin.write("parents fe_select\n");
+    // child.stdin.write("rnt\n");
+    child.stdin.write("print __old_main\n");
+    // child.stdin.write("parents fe_select\n");
     child.stdout.on('data', function(data) {
         // There is some data to read now.
         console.log("" + data);

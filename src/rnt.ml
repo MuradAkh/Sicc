@@ -13,19 +13,61 @@ let generate_id _ = begin
   "RNT_NODE_"^ Int.to_string curr;
 end
 
+
+
+
+
 let get_function_name (sname : Cabs.single_name): string = begin 
   let (_, _, (name, _, _, _)) = sname in name
 end
 
 type variable_list = (string * Cabs.base_type) sexp_list
 type rnt_node = 
-   | GhostFunction of string list (* callers of an imported function *)
+   | GhostFunction of string * string list (* callers of an imported function *)
    | InnerNode of string * variable_list * Cabs.statement * string (* id of parent *)
    | FunctionNode of Cabs.single_name * Cabs.body 
         * string list (* ids of parents *) 
         * ((string, string sexp_list, String.comparator_witness) Map.t) (* rnt *)
 
 type rntMapT = (string, rnt_node, String.comparator_witness) Map.t
+
+let get_rnt_id = begin function 
+  | InnerNode(name, _, _, _) -> name
+  | FunctionNode((_, _, (name, _, _, _)), _, _, _) -> name
+  | GhostFunction(name, _) -> name
+end 
+
+
+(* Makes total sence, nothing to see here *)
+let rec get_all_called_funs ignore_set rnt node: rnt_node list = begin match node with
+ | InnerNode(_, _, statement, _) -> 
+    let open List.Monad_infix in 
+    let calls = Util.calls_in_stmts statement in 
+    node :: begin calls
+      |> List.filter ~f:(fun call -> not @@ Set.mem ignore_set call)
+      |> List.map ~f:(fun call -> Map.find rnt call)
+      >>= (function None -> [] | Some(a) -> [a])
+      >>= get_all_called_funs (Set.union ignore_set @@ Set.of_list (module String) calls) rnt
+      |> List.map ~f:(fun curr -> (get_rnt_id curr, curr))
+      |> Map.of_alist_reduce (module String) ~f:(fun a _ -> a) 
+      |> Map.to_alist
+      |> List.map ~f:(fun (_, v) -> v)
+    end
+ | FunctionNode(_, (defs, statement), _, _) -> 
+    let open List.Monad_infix in 
+    let calls = (Util.do_def_exprs Util.search_calls defs) @ Util.calls_in_stmts statement in 
+    node :: begin calls
+      |> List.filter ~f:(fun call -> not @@ Set.mem ignore_set call)
+      |> List.map ~f:(fun call -> Map.find rnt call)
+      >>= (function None -> [] | Some(a) -> [a])
+      >>= get_all_called_funs (Set.union ignore_set @@ Set.of_list (module String) calls) rnt
+      |> List.map ~f:(fun curr -> (get_rnt_id curr, curr))
+      |> Map.of_alist_reduce (module String) ~f:(fun a _ -> a) 
+      |> Map.to_alist
+      |> List.map ~f:(fun (_, v) -> v)
+    end 
+ | GhostFunction(_) -> []
+end
 
 let get_linear_seq (stmt : Cabs.statement) : (Cabs.statement * Cabs.statement) option = 
   let is_cheap = begin function 
@@ -77,7 +119,7 @@ end
 let print_rnt = begin function 
   | InnerNode(name, varlist, statement, _) -> Cprint.print_def @@ make_function statement varlist name 
   | FunctionNode(sn, body, _, _) -> Cprint.print_def @@ Cabs.FUNDEF(sn, body)
-  | GhostFunction(_) -> Stdio.print_endline "GHOST";
+  | GhostFunction(name, _) -> Stdio.print_endline @@ "GHOST:" ^ name;
 end 
 
 let rec generate_inner_rnt ntm (parent_id: string) index_map tree_map statement = begin 
@@ -207,9 +249,9 @@ let update_func_parents (index_map : rntMapT) funcnode : rntMapT = begin
           Map.update acc callee ~f:(function 
             | Some(FunctionNode(sn, b, parents, rnt)) -> FunctionNode(sn, b, name :: parents, rnt) 
             (* | Some(a) -> a *)
-            | Some(GhostFunction(parents)) -> GhostFunction(name :: parents)
+            | Some(GhostFunction(f, parents)) -> GhostFunction(f, name :: parents)
             | Some(n) -> n
-            | None -> GhostFunction([])
+            | None -> GhostFunction(callee, [])
           ) 
         end 
           @@ Set.to_list 
