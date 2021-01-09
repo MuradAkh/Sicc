@@ -5,7 +5,7 @@ open Base
 let run_server (funs, entry) nonfuns = begin 
    let rnt = generate_rnt @@ entry :: funs in 
 
-   let function_printer name node = begin
+  let function_printer name node = begin
    Cprint.print_defs nonfuns;
    Rnt.get_all_called_funs (Set.of_list (module String) [name]) rnt node
    |> List.rev
@@ -22,8 +22,14 @@ let run_server (funs, entry) nonfuns = begin
    let get_parents name = begin 
       match Map.find rnt name with 
       | Some(InnerNode(_, _, _, p)) -> Stdio.print_endline p
-      | Some(FunctionNode(_, _, p, _)) -> List.iter ~f:(fun a ->  Stdio.print_endline a) p
-      | Some(GhostFunction(_, p)) -> List.iter ~f:(fun a ->  Stdio.print_endline a) p
+      | Some(FunctionNode(_, _, p, _)) -> 
+        Set.of_list (module String) p 
+        |> Set.to_list 
+        |> List.iter ~f:(fun a -> Stdio.print_endline a) 
+      | Some(GhostFunction(_, p)) -> 
+        Set.of_list (module String) p 
+        |> Set.to_list 
+        |> List.iter ~f:(fun a -> Stdio.print_endline a) 
       | None -> Stdio.print_endline "$NOT_FOUND"
    end in
 

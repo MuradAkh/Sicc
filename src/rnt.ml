@@ -13,10 +13,6 @@ let generate_id _ = begin
   "RNT_NODE_"^ Int.to_string curr;
 end
 
-
-
-
-
 let get_function_name (sname : Cabs.single_name): string = begin 
   let (_, _, (name, _, _, _)) = sname in name
 end
@@ -24,7 +20,11 @@ end
 type variable_list = (string * Cabs.base_type) sexp_list
 type rnt_node = 
    | GhostFunction of string * string list (* callers of an imported function *)
-   | InnerNode of string * variable_list * Cabs.statement * string (* id of parent *)
+   | InnerNode of 
+        string * (* id *)
+        variable_list * 
+        Cabs.statement * 
+        string (* id of parent *)
    | FunctionNode of Cabs.single_name * Cabs.body 
         * string list (* ids of parents *) 
         * ((string, string sexp_list, String.comparator_witness) Map.t) (* rnt *)
@@ -212,8 +212,8 @@ let add_func_node index_map funcnode = begin
     in
 
     let open Option.Monad_infix in
-    param_types >>| fun types -> 
-    Map.of_alist_reduce ~f:(fun a _ -> a) (module String) @@ List.concat [types; defs_types]
+      param_types >>| fun types -> 
+      Map.of_alist_reduce ~f:(fun a _ -> a) (module String) @@ List.concat [types; defs_types]
   end in
 
 
@@ -334,8 +334,3 @@ let get_funcs ?(reverse=false) (defs: Cabs.definition list) = begin
 
   List.filter ~f:do_fun defs;
 end 
-
-
-
-
- 
