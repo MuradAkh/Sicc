@@ -1,6 +1,6 @@
 (executable
  (name main)
- (libraries base stdio FrontC)
+ (libraries base core stdio FrontC)
 )
 
 (env
